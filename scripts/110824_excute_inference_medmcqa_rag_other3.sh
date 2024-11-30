@@ -1,11 +1,5 @@
 #!/bin/bash
-#SBATCH -p gpu_long
-#SBATCH -c 4
-#SBATCH -t 100:00:00
-#SBATCH --gres=gpu:3090:1
-#SBATCH --account=is-nlp
-#SBATCH --job-name=manipulation-3090
-#SBATCH -o logs/slurm-%x-%j.log
+set -eu
 
 project=$(pwd)
 source $project/.venv/bin/activate
