@@ -1,7 +1,3 @@
-"""
-モデルごとのcalibration curveのパターンを全て1枚のグラフにプロットする
-"""
-
 from pathlib import Path
 import os
 import argparse
@@ -9,22 +5,28 @@ import json
 import matplotlib.pyplot as plt
 from sklearn.calibration import calibration_curve
 
+def parse_args():
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--model", type=str, default="microsoft/Phi-3.5-mini-instruct")
+  return parser.parse_args()
 
 def load_jsonl(file_path):
   with open(file_path, "r") as f:
     return [json.loads(line) for line in f]
 
-
-project_root = Path("/cl/home2/shintaro/rag-notebook")
-
+################################
+project_root = Path("ROOT_PATH")
+################################
 
 def evaluate_line_graph(model):
-  ploted_dir = project_root / "shintaro/plotted.manipulated"
+  ####################################################
+  ploted_dir = project_root / "YOUR_PLOT_DIR"
   ploted_dir.mkdir(parents=True, exist_ok=True)
-  inferenced_dir = project_root / "make_datastore_py310/data/inferenced"
-  manipulated_inferenced_dir = project_root / "make_datastore_py310/data/manipulated"
+  inferenced_dir = project_root / "YOUR_INFERENCED_DIR"
+  manipulated_inferenced_dir = project_root / "YOUR_MANIPULATED_INFERENCED_DIR"
   base_model_suffix = model.split("/")[-1]
   base_line_file = inferenced_dir / f"medmcqa.{base_model_suffix}.inferenced.jsonl"
+  ####################################################
 
   file_paths = []
   file_paths.append(base_line_file)
@@ -64,16 +66,7 @@ def evaluate_line_graph(model):
   plt.savefig(ploted_dir / save_filename)
   print(f"Done! Evaluation results are saved to {ploted_dir / save_filename}")
 
-
-# models: microsoft/Phi-3.5-mini-instruct, axiong/PMC_LLaMA_13B, meta-llama/Llama-3.1-70B, epfl-llm/meditron-70b
-def parse_args():
-  parser = argparse.ArgumentParser()
-  parser.add_argument("--model", type=str, default="microsoft/Phi-3.5-mini-instruct")
-  return parser.parse_args()
-
-
 if __name__ == "__main__":
   args = parse_args()
   model = args.model
-  print(f"model: {model}")
   evaluate_line_graph(model)

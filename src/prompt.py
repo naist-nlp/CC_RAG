@@ -29,7 +29,6 @@ D. {option_4}
 
 Answer:"""
 
-# RAGなしのprompt
 general_pure = """
 Here is the question:
 {question}

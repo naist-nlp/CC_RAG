@@ -1,7 +1,3 @@
-"""
-generateを行わずに推論する。
-"""
-
 from pathlib import Path
 import os
 import math
@@ -29,9 +25,20 @@ logging.basicConfig(
 )
 logger: logging.Logger = logging.getLogger(__name__)
 
-project_root = Path("/cl/home2/shintaro/rag-notebook")
+###############################################
+project_root = Path("ROOT_PATH")
 load_dotenv()
 random.seed(42)
+###############################################
+
+def parse_args():
+  parser = argparse.ArgumentParser()
+  parser.add_argument(
+      "--inference_model", type=str, required=True, default="microsoft/Phi-3.5-mini-instruct")
+  parser.add_argument("--quantize_type", type=str, default="none")
+  parser.add_argument("--prompt_pattern", type=int)
+  return parser.parse_args()
+
 
 
 def load_jsonl(file_path):
@@ -80,7 +87,6 @@ def calculate_probability(args, model, tokenizer, sentence_prefix, answer):
 
 
 def get_random_sentence(data, k, answer):
-  # ランダムにk件取得する。 そのlineのline['explanation']がnullの場合は、再度取得する。
   retrieved_documents = []
   for _ in range(k):
     while True:
@@ -93,7 +99,7 @@ def get_random_sentence(data, k, answer):
 
 def make_prompt(question, choices, retrieved_documents, prompt_pattern):
   system_prompt = ""
-  concatenated_text = "* " + "\n* ".join(retrieved_documents)
+  concatenated_text = retrieved_documents
   system_prompt = general_medrag_system
   if prompt_pattern == 1:
     template = general_medrag_pattern1
@@ -150,7 +156,6 @@ def initialize_model(model_name, quantize_type, device, hf_token):
     model_kwargs.update({"torch_dtype": torch.float16})
 
   model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-  # 量子化がない場合、モデルを適切なデバイスに移動
   if quantize_type == "none" or quantize_type == "half":
     model.to(device)
   model.eval()
@@ -158,10 +163,9 @@ def initialize_model(model_name, quantize_type, device, hf_token):
 
 
 def run_model(base_model_name, qa_dataset_path, output_file, quantize_type, prompt_pattern):
-  if base_model_name == "meta-llama/Llama-2-70b" or base_model_name == "meta-llama/Llama-3.1-8B":
-    hf_token = os.environ["GEMMA_TOKEN"]
-  else:
-    hf_token = os.environ["HUGGINGFACE_TOKEN"]
+  ###########################################
+  hf_token = os.environ["HUGGINGFACE_TOKEN"]
+  ###########################################
 
   args = {
       "model_path": base_model_name,
@@ -177,28 +181,19 @@ def run_model(base_model_name, qa_dataset_path, output_file, quantize_type, prom
 
   result_dataset = []
   data = load_jsonl(qa_dataset_path)
-  # explanation がnullのものは除外する。2206件になるはず
   data = [line for line in data if line['explanation'] is not None]
 
   for item in tqdm(data):
     question = item["question"]
     choices = item["choices"]["text"]
     labels = item["choices"]["label"]
-
     log_probs = {}
 
     choise_perplexity_probabilities = []
-    random_noise = get_random_sentence(data, 2, choices[labels.index(item["answerKey"])])
     for i, choice in enumerate(choices):
-
-      # ここでtop-k件取得する。
-      retrieved_documents = []
-      retrieved_documents.append(item['explanation'])
-      retrieved_documents.extend(random_noise)
-
+      retrieved_documents = item['explanation']
       sentence_prefix = make_prompt(question, choices, retrieved_documents, prompt_pattern)
       answer = labels[i]
-      print(f'=========\n{sentence_prefix}{answer}\n===============')
 
       log_prob = calculate_probability(args, model, tokenizer, sentence_prefix, answer)
       log_probs[choice] = log_prob
@@ -236,24 +231,15 @@ def run_model(base_model_name, qa_dataset_path, output_file, quantize_type, prom
   save_jsonl(output_file, result_dataset)
   print(f"Results saved to {output_file}!")
 
-
-def parse_args():
-  parser = argparse.ArgumentParser()
-  parser.add_argument(
-      "--inference_model", type=str, required=True, default="microsoft/Phi-3.5-mini-instruct")
-  parser.add_argument("--quantize_type", type=str, default="none")
-  parser.add_argument("--prompt_pattern", type=int)
-  return parser.parse_args()
-
-
 if __name__ == "__main__":
   load_dotenv()
   args = parse_args()
-  # jsonlはなんでもok
-  model_input_file = project_root / "make_datastore_py310/data/retrieved" / "medmcqa.pubmed.BM25.512length.retrieved.jsonl"
-  model_output_dir = project_root / "make_datastore_py310/data/manipulated"
+  ####################################
+  model_input_file = project_root / "YOUR_RETRIEVED_DIR" / "medmcqa.pubmed.BM25.512length.retrieved.jsonl"
+  model_output_dir = project_root / "YOUR_OUTPUT_DIR"
   model_output_dir.mkdir(exist_ok=True, parents=True)
-  model_output_file = model_output_dir / f"ans1.other2.prompt{args.prompt_pattern}.{args.inference_model.split('/')[-1]}.manipulated.jsonl"
+  model_output_file = model_output_dir / f"ans1.prompt{args.prompt_pattern}.{args.inference_model.split('/')[-1]}.manipulated.jsonl"
+  ####################################
 
   logger.info(f"Running inference using {args.inference_model} model...")
   logger.info(f"Retrieved documents are loaded from {model_input_file}")

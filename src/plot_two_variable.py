@@ -5,8 +5,15 @@ from pathlib import Path
 import os
 import argparse
 
-project_root = Path('/cl/home2/shintaro/rag-notebook')
+################################################
+project_root = Path('PROJECT_ROOT_DIR')
+################################################
 
+def parse_args():
+  parser = argparse.ArgumentParser(description="")
+  parser.add_argument('--base_model', type=str)
+  parser.add_argument('--task', type=str)
+  return parser.parse_args()
 
 def load_jsonl(file_path):
   with open(file_path, 'r') as f:
@@ -14,7 +21,10 @@ def load_jsonl(file_path):
 
 
 def plot_as_scatter(base_model, task):
-  evaluated_dir = project_root / 'make_datastore_py310/data/evaluated'
+  #################################################
+  evaluated_dir = project_root / "EVALUATED_DIR"
+save_dir = project_root / "SAVE_DIR"
+  ################################################
   base_model_suffix = base_model.split("/")[-1]
   base_line_file = evaluated_dir / f"{task}.{base_model_suffix}.evaluated.jsonl"
 
@@ -40,13 +50,12 @@ def plot_as_scatter(base_model, task):
   })
   blind_pallete = sns.color_palette("colorblind", 10)
 
-  # color blindを考慮したカラーパレット
   color_pallet_dict = {
-      "MedCPT-Query-Encoder": blind_pallete[0],  # 青
-      "contriever": blind_pallete[2],  # 緑
-      "specter": blind_pallete[1],  # 濃いオレンジ
+      "MedCPT-Query-Encoder": blind_pallete[0],
+      "contriever": blind_pallete[2],
+      "specter": blind_pallete[1],
       "BM25":
-          blind_pallete[4]  # 紫
+          blind_pallete[4]
   }
 
   for rag_model in rag_models:
@@ -71,18 +80,15 @@ def plot_as_scatter(base_model, task):
                 "Accuracy (%)": top_data[0]["accuracy"] * 100
             })
 
-  # `Accuracy (%)`と`ECE`の範囲を計算
   accuracy_values = [entry["Accuracy (%)"] for entry in data if entry["Accuracy (%)"] != -1]
   ece_values = [entry["ECE"] for entry in data if entry["ECE"] != -1]
 
   accuracy_min, accuracy_max = min(accuracy_values), max(accuracy_values)
   ece_min, ece_max = min(ece_values), max(ece_values)
 
-  # 線の範囲を相対的に設定
   line_x = [accuracy_min, accuracy_max]
   line_y = [ece_max, ece_min]
 
-  # 描画
   plt.figure(figsize=(16, 9))
   unique_models = list(set([entry["RAG Model"] for entry in data]))
   palette = sns.color_palette("colorblind", len(unique_models))
@@ -105,7 +111,6 @@ def plot_as_scatter(base_model, task):
       for entry in subset:
         if entry["Accuracy (%)"] != -1:
           if entry["Model Variation"] == "Base Line":
-            # Base Line の特別なスタイル
             plt.scatter(
                 x=entry["Accuracy (%)"],
                 y=entry["ECE"],
@@ -114,7 +119,6 @@ def plot_as_scatter(base_model, task):
                 marker="*",
                 label="Base Line")
           else:
-            # その他のデータポイント
             plt.scatter(
                 x=entry["Accuracy (%)"],
                 y=entry["ECE"],
@@ -123,24 +127,14 @@ def plot_as_scatter(base_model, task):
                 marker=marker,
             )
 
-  # 相対的な線を描画
   plt.plot(line_x, line_y, color="gray", linestyle="--", linewidth=3)
   plt.tight_layout()
   plt.grid(True)
 
-  save_dir = project_root / 'scatter'
   save_dir.mkdir(exist_ok=True, parents=True)
   plot_file = save_dir / f"{task}_{base_model_suffix}.png"
   plt.savefig(plot_file)
   print(f"Saved combined plot: {plot_file}")
-
-
-def parse_args():
-  parser = argparse.ArgumentParser(description="")
-  parser.add_argument('--base_model', type=str)
-  parser.add_argument('--task', type=str)
-  return parser.parse_args()
-
 
 if __name__ == "__main__":
   args = parse_args()

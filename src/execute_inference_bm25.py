@@ -2,18 +2,21 @@ from pathlib import Path
 import os
 import math
 import json
-import torch
-from dotenv import load_dotenv
-import argparse
+from tqdm import tqdm
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
 )
-from prompt import *
+import Stemmer
+import bm25s
+import torch
 import logging
+import argparse
 import sys
+from prompt import *
+from dotenv import load_dotenv
 
 logging.basicConfig(
     format="| %(asctime)s | %(message)s",
@@ -32,6 +35,20 @@ def save_jsonl(file_path, data):
   with open(file_path, "w") as f:
     for line in data:
       f.write(json.dumps(line) + "\n")
+
+
+def search_by_bm25(query_text, k, retriever, corpus):
+  stemmer = Stemmer.Stemmer("english")
+  query_tokens = bm25s.tokenize([query_text], stopwords="en", stemmer=stemmer)
+  results, scores = retriever.retrieve(query_tokens, k=k)
+  results = [str(doc_id) for doc_id in results[0]]
+  return results
+
+
+def setup_bm25_retriever(index_path):
+  retriever = bm25s.BM25.load(index_path, load_corpus=True)
+  corpus_dict = {str(doc["id"]): doc["text"] for doc in retriever.corpus}
+  return retriever, corpus_dict
 
 
 def calculate_probability(args, model, tokenizer, sentence_prefix, answer):
@@ -66,34 +83,6 @@ def calculate_probability(args, model, tokenizer, sentence_prefix, answer):
   log_prob = -average_loss.item()
   assert math.isnan(log_prob) == False, f"log_prob is nan: {log_prob}"
   return log_prob
-
-
-def make_prompt(task, question, choices, retrieved_documents):
-  concatenated_text = "* " + "\n* ".join(retrieved_documents)
-  system_prompt = ""
-  if task in ["medqa", "medmcqa", "mmlu", "pubmedqa"]:
-    system_prompt = general_medrag_system
-    if task == "pubmedqa":
-      prompt = pubmedqa_medrag.format(
-          context=concatenated_text,
-          question=question,
-          option_1=choices[0],
-          option_2=choices[1],
-          option_3=choices[2],
-      )
-    else:
-      prompt = general_medrag.format(
-          context=concatenated_text,
-          question=question,
-          option_1=choices[0],
-          option_2=choices[1],
-          option_3=choices[2],
-          option_4=choices[3],
-      )
-    prompt = system_prompt + prompt
-  else:
-    prompt = f"""Here is the question:\n{question}\n\nHere are the potential choices:\nA: {choices[0]}\nB: {choices[1]}\nC: {choices[2]}\nD: {choices[3]}\n\nPlease think step-by-step and generate your output in below format:\nAnswer: """
-  return prompt
 
 
 def initialize_model(model_name, quantize_type, device, hf_token):
@@ -133,19 +122,48 @@ def initialize_model(model_name, quantize_type, device, hf_token):
     model_kwargs.update({"torch_dtype": torch.float16})
 
   model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-  # 量子化がない場合、モデルを適切なデバイスに移動
   if quantize_type == "none" or quantize_type == "half":
     model.to(device)
   model.eval()
   return model, tokenizer
 
 
-def run_model(base_model_name, rag_model_name, qa_dataset_path, output_file, task, top_k,
-              inference_max_length, quantize_type):
-  if base_model_name == "meta-llama/Llama-2-70b" or base_model_name == "meta-llama/Llama-3.1-70B-Instruct":
-    hf_token = os.environ["GEMMA_TOKEN"]
+def make_prompt(task, question, choices, retrieved_documents):
+  concatenated_text = "* " + "\n* ".join(retrieved_documents)
+  system_prompt = ""
+  if task in ["medqa", "medmcqa", "mmlu", "pubmedqa"]:
+    system_prompt = general_medrag_system
+    if task == "pubmedqa":
+      prompt = pubmedqa_medrag.format(
+          context=concatenated_text,
+          question=question,
+          option_1=choices[0],
+          option_2=choices[1],
+          option_3=choices[2],
+      )
+    else:
+      prompt = general_medrag.format(
+          context=concatenated_text,
+          question=question,
+          option_1=choices[0],
+          option_2=choices[1],
+          option_3=choices[2],
+          option_4=choices[3],
+      )
+    prompt = system_prompt + prompt
   else:
-    hf_token = os.environ["HUGGINGFACE_TOKEN"]
+    raise ValueError(f"Invalid task: {task}")
+  return prompt
+
+
+def run_model(base_model_name, qa_dataset_path, output_file, task, top_k, inference_max_length,
+              rag_db, max_length, quantize_type):
+
+  ###########################################################
+  # Please set the following variables
+  hf_token = os.environ["HUGGINGFACE_TOKEN"]
+  ###########################################################
+
   args = {
       "model_path": base_model_name,
       "hf_token": hf_token,
@@ -161,7 +179,13 @@ def run_model(base_model_name, rag_model_name, qa_dataset_path, output_file, tas
   result_dataset = []
   data = load_jsonl(qa_dataset_path)
 
-  for item in data:
+  ###########################################################
+  # Please set the following variables
+  datastore_dir = project_root /  "YOUR_INDEX_DIR" / f"{rag_db}.bm25.{max_length}length.datastore"
+  ###########################################################
+  retriever, corpus = setup_bm25_retriever(datastore_dir)
+
+  for item in tqdm(data):
     question = item["question"]
     choices = item["choices"]["text"]
     labels = item["choices"]["label"]
@@ -169,16 +193,12 @@ def run_model(base_model_name, rag_model_name, qa_dataset_path, output_file, tas
 
     choise_perplexity_probabilities = []
     for i, choice in enumerate(choices):
-      # ここでtop-k件取得する。
-      retrieved_documents = item["retrieved_documents"][:top_k]
-      retrieved_scores = item["retrieved_scores"][:top_k]
-      sentence_prefix = make_prompt(task, question, choices, retrieved_documents)
+      retrived_documents = search_by_bm25(question, top_k, retriever, corpus)
+      sentence_prefix = make_prompt(task, question, choices, retrived_documents)
       answer = labels[i]
-      print(f"===prompt===\n{sentence_prefix}{answer}\n======")
 
       log_prob = calculate_probability(args, model, tokenizer, sentence_prefix, answer)
       log_probs[choice] = log_prob
-      print(f"Probability for the answer '{choice}': {log_prob}")
 
     log_probs_list = torch.Tensor(list(log_probs.values()))
     lse = torch.logsumexp(log_probs_list, 0).item()
@@ -216,28 +236,26 @@ def run_model(base_model_name, rag_model_name, qa_dataset_path, output_file, tas
 
 def parse_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument(
-      "--inference_model", type=str, required=True, default="microsoft/Phi-3.5-mini-instruct", help="Model name to run inference")
-  parser.add_argument("--rag_model", type=str, required=True, default="facebook/contriever", help="RAG model name")
+  parser.add_argument("--inference_model", type=str, required=True, help="Model name to run inference")
+  parser.add_argument("--top_k", type=int, default=5, help="Top-k retrieved documents")
+  parser.add_argument("--rag_db", type=str, default="textbooks", help="RAG dataset name")
   parser.add_argument("--task", type=str, required=True, default="medqa", help="Task name")
-  parser.add_argument("--rag_db", type=str, required=True, default="pubmed", help="RAG dataset name")
-  parser.add_argument("--top_k", type=int, required=True, default=5, help="Top-k retrieved documents")
-  parser.add_argument("--rag_max_length", type=int, required=True, default=2048, help="RAG max embedding length")
+  parser.add_argument("--rag_max_length", type=int, required=True, default=512, help="RAG max embedding length")
   parser.add_argument("--inference_max_length", type=int, required=True, default=2048, help="Inference max length")
-  parser.add_argument("--quantize_type", type=str, default="none", help="Quantization type of the inference model")
+  parser.add_argument("--quantize_type", type=str, default="none")
   return parser.parse_args()
 
 
 if __name__ == "__main__":
-  load_dotenv()
   args = parse_args()
+  load_dotenv()
   ###############################################
   # Please set the following variables
-  project_root = Path("/cl/home2/shintaro/rag-notebook")
-  model_input_file = project_root / "make_datastore_py310/data/retrieved" / f"{args.task}.{args.rag_db}.{args.rag_model.split('/')[-1]}.{args.rag_max_length}length.retrieved.jsonl"
-  model_output_dir = project_root / "make_datastore_py310/data/inferenced"
+  project_root = Path("YOUR_PROJECT_ROOT_DIR")
+  model_input_file = project_root / "YOUR_MODEL_INPUT_DIR" / f"{args.task}.{args.rag_db}.BM25.{args.rag_max_length}length.retrieved.jsonl"
+  model_output_dir = project_root / "YOU_MODEL_OUTPUT_DIR"
   model_output_dir.mkdir(exist_ok=True, parents=True)
-  model_output_file = model_output_dir / f"{args.task}.{args.rag_db}.{args.rag_model.split('/')[-1]}.{args.rag_max_length}length.{args.inference_model.split('/')[-1]}.top{args.top_k}.inferenced.jsonl"
+  model_output_file = model_output_dir / f"{args.task}.{args.rag_db}.BM25.{args.rag_max_length}length.{args.inference_model.split('/')[-1]}.top{args.top_k}.inferenced.jsonl"
   ###############################################
 
   logger.info(
@@ -245,5 +263,5 @@ if __name__ == "__main__":
   )
   logger.info(f"Retrieved documents are loaded from {model_input_file}")
   logger.info(f"Results will be saved to {model_output_file}")
-  run_model(args.inference_model, args.rag_model, model_input_file, model_output_file, args.task,
-            args.top_k, args.inference_max_length, args.quantize_type)
+  run_model(args.inference_model, model_input_file, model_output_file, args.task, args.top_k,
+            args.inference_max_length, args.rag_db, args.rag_max_length, args.quantize_type)

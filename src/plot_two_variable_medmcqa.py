@@ -1,8 +1,3 @@
-"""
-x軸にaccuracy, y軸にconfidenceをとった散布図を描く
-RAGをすることでconfidenceがどれだけ下がるかを確認する
-"""
-
 import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -11,19 +6,27 @@ import os
 import argparse
 import json
 
-project_root = Path('/cl/home2/shintaro/rag-notebook')
-
+####################################
+project_root = Path("ROOT_PATH")
+####################################
 
 def load_jsonl(file_path):
   with open(file_path, 'r') as f:
     return [json.loads(line) for line in f]
 
+def parse_args():
+  parser = argparse.ArgumentParser(description="")
+  parser.add_argument('--base_model', type=str)
+  return parser.parse_args()
+
 
 def plot_as_scatter(base_model):
-  evaluated_dir = project_root / 'make_datastore_py310/data/evaluated'
-  manipulated_evaluated_dir = project_root / 'make_datastore_py310/data/evaluated.manipulated'
+  ########################################################
+  evaluated_dir = project_root / "YOUR_EVALUATED_DIR"
+  manipulated_evaluated_dir = project_root / "YOUR_MANIPULATED_EVALUATED_DIR"
   base_model_suffix = base_model.split("/")[-1]
   base_line_file = evaluated_dir / f"medmcqa.{base_model_suffix}.evaluated.jsonl"
+  ########################################################
 
   data = []
   labels = ["Base Line"]
@@ -60,8 +63,6 @@ def plot_as_scatter(base_model):
     except:
       other3_data = [{"ECE": -1, "MCE": -1, "RMSCE": -1, "accuracy": -1}]
 
-    # 順番にappend
-    # accuracyが-1の場合はデータがないのでスキップ
     if ans1_data[0]["accuracy"] != -1:
       data.append({
           "Model Variation": f"ans1.prompt{prompt_pattern}",
@@ -89,17 +90,14 @@ def plot_as_scatter(base_model):
           "RMSCE": other3_data[0]["RMSCE"],
           "Accuracy (%)": other3_data[0]["accuracy"] * 100
       })
-  # DataFrameの作成
   df = pd.DataFrame(data)
 
-  # Seabornのcolor_blindパレットを使用してRAGモデルごとに色を割り当て
   unique_models = df["Prompt Pattern"].unique()
   palette = sns.color_palette("colorblind", len(unique_models))
   color_dict = dict(zip(unique_models, palette))
   save_dir = project_root / 'scatter.manipulated'
   save_dir.mkdir(exist_ok=True, parents=True)
 
-  # TODO: この辺変更
   plt.figure(figsize=(16, 9))
   for prompt_pattern in prompt_patterns:
     ans1_subset_df = df[df["Model Variation"] == f"ans1.prompt{prompt_pattern}"]
@@ -144,7 +142,6 @@ def plot_as_scatter(base_model):
         s=200,
         marker="^")
 
-    # 同じモデルのものを線で結ぶ
     for i in range(len(ans1_subset_df)):
       x = ans1_subset_df.iloc[i]["Accuracy (%)"]
       y = ans1_subset_df.iloc[i]["ECE"]
@@ -170,13 +167,6 @@ def plot_as_scatter(base_model):
   plot_file = save_dir / f"{base_model_suffix}.png"
   plt.savefig(plot_file)
   print(f"Saved combined plot: {plot_file}")
-
-
-def parse_args():
-  parser = argparse.ArgumentParser(description="")
-  parser.add_argument('--base_model', type=str)
-  return parser.parse_args()
-
 
 if __name__ == "__main__":
   args = parse_args()

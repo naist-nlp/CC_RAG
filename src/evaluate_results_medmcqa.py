@@ -1,8 +1,3 @@
-"""
-結果を評価する
-出力は画像とその値のjsonl
-"""
-
 from pathlib import Path
 import json
 import numpy as np
@@ -10,8 +5,9 @@ from sklearn.calibration import calibration_curve
 import matplotlib.pyplot as plt
 import argparse
 
-project_root = Path("/cl/home2/shintaro/rag-notebook")
-
+###############################################
+project_root = Path("ROOT_DIR")
+###############################################
 
 def load_jsonl(file_path):
   with open(file_path, "r") as f:
@@ -44,7 +40,6 @@ def parse_args():
 
 
 def calculate_ACE(probabilities, correct_labels, num_ranges=10):
-  # Sort predictions and labels by probability
   sorted_indices = np.argsort(probabilities)
   sorted_probs = np.array(probabilities)[sorted_indices]
   sorted_labels = np.array(correct_labels)[sorted_indices]
@@ -55,7 +50,7 @@ def calculate_ACE(probabilities, correct_labels, num_ranges=10):
     start_idx = r * range_size
     end_idx = (
         r +
-        1) * range_size if r < num_ranges - 1 else N  # Last range takes all remaining predictions
+        1) * range_size if r < num_ranges - 1 else N
     range_probs = sorted_probs[start_idx:end_idx]
     range_labels = sorted_labels[start_idx:end_idx]
     confidence = np.mean(range_probs)
@@ -205,14 +200,16 @@ def evaluate_bar_graph(file_path, num_bins, save_filename):
 
 if __name__ == "__main__":
   args = parse_args()
+
+  ######################################################################
   base_model_name = args.base_model_name.split("/")[-1]
   prompt_pattern = args.prompt_pattern
-  ans1_inferenced_input_path = project_root / f"make_datastore_py310/data/manipulated/ans1.prompt{prompt_pattern}.{base_model_name}.manipulated.jsonl"
-  ans1_other2_inferenced_input_path = project_root / f"make_datastore_py310/data/manipulated/ans1.other2.prompt{prompt_pattern}.{base_model_name}.manipulated.jsonl"
-  other3_inferenced_input_path = project_root / f"make_datastore_py310/data/manipulated/other3.prompt{prompt_pattern}.{base_model_name}.manipulated.jsonl"
-
+  ans1_inferenced_input_path = project_root / "MANIPUPLATED_DIR" / f"ans1.prompt{prompt_pattern}.{base_model_name}.manipulated.jsonl"
+  ans1_other2_inferenced_input_path = project_root / "MANIPUPLATED_DIR" / f"ans1.other2.prompt{prompt_pattern}.{base_model_name}.manipulated.jsonl"
+  other3_inferenced_input_path = project_root / "MANIPUPLATED_DIR" / f"other3.prompt{prompt_pattern}.{base_model_name}.manipulated.jsonl"
   save_dir = project_root / "make_datastore_py310/data/evaluated.manipulated"
   save_dir.mkdir(exist_ok=True, parents=True)
+  #######################################################################
 
   ans1_save_filename = save_dir / f"ans1.prompt{prompt_pattern}.{base_model_name}.evaluated.jsonl"
   ans1_save_line_graph_filename = save_dir / f"ans1.prompt{prompt_pattern}.{base_model_name}.calibration_curve.png"

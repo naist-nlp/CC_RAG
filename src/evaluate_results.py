@@ -1,8 +1,3 @@
-"""
-結果を評価する
-出力は画像とその値のjsonl
-"""
-
 from pathlib import Path
 import json
 import numpy as np
@@ -10,16 +5,13 @@ from sklearn.calibration import calibration_curve
 import matplotlib.pyplot as plt
 import argparse
 
-project_root = Path("/cl/home2/shintaro/rag-notebook")
-
-
 def load_jsonl(file_path):
   with open(file_path, "r") as f:
     return [json.loads(line) for line in f]
 
 
 def save_jsonl(file_path, data):
-  with open(str(file_path), "w") as f:
+  with open(file_path, "w") as f:
     for line in data:
       f.write(json.dumps(line) + "\n")
 
@@ -39,11 +31,7 @@ def process_data(data):
 def parse_args():
   parser = argparse.ArgumentParser()
   parser.add_argument("--base_model_name", type=str, required=True)
-  parser.add_argument("--rag_model_name", type=str)
-  parser.add_argument("--top_k", type=int, default=1)
-  parser.add_argument("--rag_db", type=str, required=True)
   parser.add_argument("--task", type=str, required=True)
-  parser.add_argument("--max_length", type=int, required=True)
   return parser.parse_args()
 
 
@@ -59,7 +47,7 @@ def calculate_ACE(probabilities, correct_labels, num_ranges=10):
     start_idx = r * range_size
     end_idx = (
         r +
-        1) * range_size if r < num_ranges - 1 else N  # Last range takes all remaining predictions
+        1) * range_size if r < num_ranges - 1 else N
     range_probs = sorted_probs[start_idx:end_idx]
     range_labels = sorted_labels[start_idx:end_idx]
     confidence = np.mean(range_probs)
@@ -119,7 +107,6 @@ def evaluate_line_graph(file_path, save_filename):
   plt.legend()
   plt.grid()
 
-  print(f"Saving calibration curve to {save_filename}")
   plt.savefig(save_filename)
   print(f"Data length: {len(data)}")
   print(f"Correct answers: {sum(actuals)}")
@@ -129,8 +116,9 @@ def evaluate_line_graph(file_path, save_filename):
       "data_length": len(data),
       "correct_answers": sum(actuals),
       "accuracy": accuracy,
-      "calibration_curve": save_filename,
+      "calibration_curve": str(save_filename),
   })
+  print(f"Done! Evaluation results are saved to {save_filename}")
   return evaluated_data
 
 
@@ -210,16 +198,17 @@ def evaluate_bar_graph(file_path, num_bins, save_filename):
 
 if __name__ == "__main__":
   args = parse_args()
-  rag_model_name = args.rag_model_name.split("/")[-1]
+  ######################################################
+  project_root = Path("YOUR_PROJECT_ROOT_DIR")
   base_model_name = args.base_model_name.split("/")[-1]
-  inferenced_input_path = project_root / f"make_datastore_py310/data/inferenced/{args.task}.{args.rag_db}.{rag_model_name}.{args.max_length}length.{base_model_name}.top{args.top_k}.inferenced.jsonl"
-  save_dir = project_root / "make_datastore_py310/data/evaluated"
+  inferenced_input_path = project_root / "YOUR_INFERENCED_DIR" / f"{args.task}.{base_model_name}.inferenced.jsonl"
+  save_dir = project_root / "YOUR_EVALUATE_DIR"
   save_dir.mkdir(exist_ok=True, parents=True)
-  save_filename = save_dir / f"{args.task}.{args.rag_db}.{rag_model_name}.{args.max_length}length.{base_model_name}.top{args.top_k}.evaluated.jsonl"
-  save_line_graph_filename = save_dir / f"{args.task}.{args.rag_db}.{rag_model_name}.{args.max_length}length.{base_model_name}.top{args.top_k}.calibration_curve.png"
-  save_bar_graph_filename = save_dir / f"{args.task}.{args.rag_db}.{rag_model_name}.{args.max_length}length.{base_model_name}.top{args.top_k}.accuracy_by_bins.png"
+  save_filename = save_dir / f"{args.task}.{base_model_name}.evaluated.jsonl"
+  save_line_graph_filename = save_dir / f"{args.task}.{base_model_name}.calibration_curve.png"
+  save_bar_graph_filename = save_dir / f"{args.task}.{base_model_name}.accuracy_by_bins.png"
+  ######################################################
 
-  print(f"Start evaluating {rag_model_name} with {base_model_name}...")
   print(f"Input file: {inferenced_input_path}")
   line_graph_data = evaluate_line_graph(str(inferenced_input_path), save_line_graph_filename)
   bar_graph_data = evaluate_bar_graph(str(inferenced_input_path), 10, save_bar_graph_filename)

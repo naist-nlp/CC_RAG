@@ -14,8 +14,6 @@ from transformers import (
 from prompt import *
 import logging
 import sys
-import random
-from tqdm import tqdm
 
 logging.basicConfig(
     format="| %(asctime)s | %(message)s",
@@ -24,11 +22,6 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 logger: logging.Logger = logging.getLogger(__name__)
-
-project_root = Path("/cl/home2/shintaro/rag-notebook")
-load_dotenv()
-random.seed(42)
-
 
 def load_jsonl(file_path):
   with open(file_path, "r") as f:
@@ -75,37 +68,31 @@ def calculate_probability(args, model, tokenizer, sentence_prefix, answer):
   return log_prob
 
 
-def get_random_sentence(data, k, answer):
-  # ランダムにk件取得する。 そのlineのline['explanation']がnullの場合は、再度取得する。
-  retrieved_documents = []
-  for _ in range(k):
-    while True:
-      line = random.choice(data)
-      if line['explanation'] is not None and not answer in line['explanation']:
-        retrieved_documents.append(line['explanation'])
-        break
-  return retrieved_documents
-
-
-def make_prompt(question, choices, retrieved_documents, prompt_pattern):
-  system_prompt = ""
+def make_prompt(task, question, choices, retrieved_documents):
   concatenated_text = "* " + "\n* ".join(retrieved_documents)
-  system_prompt = general_medrag_system
-  if prompt_pattern == 1:
-    template = general_medrag_pattern1
-  elif prompt_pattern == 2:
-    template = general_medrag_pattern2
+  system_prompt = ""
+  if task in ["medqa", "medmcqa", "mmlu", "pubmedqa"]:
+    system_prompt = general_medrag_system
+    if task == "pubmedqa":
+      prompt = pubmedqa_medrag.format(
+          context=concatenated_text,
+          question=question,
+          option_1=choices[0],
+          option_2=choices[1],
+          option_3=choices[2],
+      )
+    else:
+      prompt = general_medrag.format(
+          context=concatenated_text,
+          question=question,
+          option_1=choices[0],
+          option_2=choices[1],
+          option_3=choices[2],
+          option_4=choices[3],
+      )
+    prompt = system_prompt + prompt
   else:
-    template = general_medrag_pattern3
-  prompt = template.format(
-      context=concatenated_text,
-      question=question,
-      option_1=choices[0],
-      option_2=choices[1],
-      option_3=choices[2],
-      option_4=choices[3],
-  )
-  prompt = system_prompt + prompt
+    raise ValueError(f"Task {task} is not supported.")
   return prompt
 
 
@@ -146,53 +133,50 @@ def initialize_model(model_name, quantize_type, device, hf_token):
     model_kwargs.update({"torch_dtype": torch.float16})
 
   model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-  # 量子化がない場合、モデルを適切なデバイスに移動
   if quantize_type == "none" or quantize_type == "half":
     model.to(device)
   model.eval()
   return model, tokenizer
 
 
-def run_model(base_model_name, qa_dataset_path, output_file, quantize_type, prompt_pattern):
-  if base_model_name == "meta-llama/Llama-2-70b" or base_model_name == "meta-llama/Llama-3.1-8B":
-    hf_token = os.environ["GEMMA_TOKEN"]
-  else:
-    hf_token = os.environ["HUGGINGFACE_TOKEN"]
-
+def run_model(base_model_name, rag_model_name, qa_dataset_path, output_file, task, top_k,
+              inference_max_length, quantize_type):
+  ###########################################################
+  # Please set the following variables
+  hf_token = os.environ["HUGGINGFACE_TOKEN"]
+  ###########################################################
   args = {
       "model_path": base_model_name,
       "hf_token": hf_token,
       "quantize_type": quantize_type,
       "device": "cuda" if torch.cuda.is_available() else "cpu",
-      "max_length": 2048,
+      "max_length": inference_max_length,
       "seed": 42,
   }
+
   model, tokenizer = initialize_model(args["model_path"], args["quantize_type"], args["device"],
                                       args["hf_token"])
 
   result_dataset = []
   data = load_jsonl(qa_dataset_path)
-  # explanation がnullのものは除外する。2206件になるはず
-  data = [line for line in data if line['explanation'] is not None]
 
-  for item in tqdm(data):
+  for item in data:
     question = item["question"]
     choices = item["choices"]["text"]
     labels = item["choices"]["label"]
-
     log_probs = {}
 
     choise_perplexity_probabilities = []
-    random_noise = get_random_sentence(data, 3, choices[labels.index(item["answerKey"])])
     for i, choice in enumerate(choices):
-
-      # ここでtop-k件取得する。
-      retrieved_documents = random_noise
-      sentence_prefix = make_prompt(question, choices, retrieved_documents, prompt_pattern)
+      retrieved_documents = item["retrieved_documents"][:top_k]
+      retrieved_scores = item["retrieved_scores"][:top_k]
+      sentence_prefix = make_prompt(task, question, choices, retrieved_documents)
       answer = labels[i]
+      print(f"===prompt===\n{sentence_prefix}{answer}\n======")
 
       log_prob = calculate_probability(args, model, tokenizer, sentence_prefix, answer)
       log_probs[choice] = log_prob
+      print(f"Probability for the answer '{choice}': {log_prob}")
 
     log_probs_list = torch.Tensor(list(log_probs.values()))
     lse = torch.logsumexp(log_probs_list, 0).item()
@@ -231,23 +215,33 @@ def run_model(base_model_name, qa_dataset_path, output_file, quantize_type, prom
 def parse_args():
   parser = argparse.ArgumentParser()
   parser.add_argument(
-      "--inference_model", type=str, required=True, default="microsoft/Phi-3.5-mini-instruct")
-  parser.add_argument("--quantize_type", type=str, default="none")
-  parser.add_argument("--prompt_pattern", type=int)
+      "--inference_model", type=str, required=True, default="microsoft/Phi-3.5-mini-instruct", help="Model name to run inference")
+  parser.add_argument("--rag_model", type=str, required=True, default="facebook/contriever", help="RAG model name")
+  parser.add_argument("--task", type=str, required=True, default="medqa", help="Task name")
+  parser.add_argument("--rag_db", type=str, required=True, default="pubmed", help="RAG dataset name")
+  parser.add_argument("--top_k", type=int, required=True, default=5, help="Top-k retrieved documents")
+  parser.add_argument("--rag_max_length", type=int, required=True, default=2048, help="RAG max embedding length")
+  parser.add_argument("--inference_max_length", type=int, required=True, default=2048, help="Inference max length")
+  parser.add_argument("--quantize_type", type=str, default="none", help="Quantization type of the inference model")
   return parser.parse_args()
 
 
 if __name__ == "__main__":
   load_dotenv()
   args = parse_args()
-  # jsonlはなんでもok
-  model_input_file = project_root / "make_datastore_py310/data/retrieved" / "medmcqa.pubmed.BM25.512length.retrieved.jsonl"
-  model_output_dir = project_root / "make_datastore_py310/data/manipulated"
+  ###############################################
+  # Please set the following variables
+  project_root = Path("YOUR_PROJECT_ROOT_DIR")
+  model_input_file = project_root / "YOUR_MODEL_INPUT_DIR" / f"{args.task}.{args.rag_db}.{args.rag_model.split('/')[-1]}.{args.rag_max_length}length.retrieved.jsonl"
+  model_output_dir = project_root / "YOU_MODEL_OUTPUT_DIR"
   model_output_dir.mkdir(exist_ok=True, parents=True)
-  model_output_file = model_output_dir / f"other3.prompt{args.prompt_pattern}.{args.inference_model.split('/')[-1]}.manipulated.jsonl"
+  model_output_file = model_output_dir / f"{args.task}.{args.rag_db}.{args.rag_model.split('/')[-1]}.{args.rag_max_length}length.{args.inference_model.split('/')[-1]}.top{args.top_k}.inferenced.jsonl"
+  ###############################################
 
-  logger.info(f"Running inference using {args.inference_model} model...")
+  logger.info(
+      f"Running inference for {args.task} task with {args.rag_db} dataset using {args.inference_model} model..."
+  )
   logger.info(f"Retrieved documents are loaded from {model_input_file}")
   logger.info(f"Results will be saved to {model_output_file}")
-  run_model(args.inference_model, model_input_file, model_output_file, args.quantize_type,
-            args.prompt_pattern)
+  run_model(args.inference_model, args.rag_model, model_input_file, model_output_file, args.task,
+            args.top_k, args.inference_max_length, args.quantize_type)
