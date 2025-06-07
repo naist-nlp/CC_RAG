@@ -53,6 +53,9 @@
         <div class="columns is-centered">
           <div class="column has-text-centered">
             <h1 class="title is-1 publication-title">Understanding the Impact of Confidence in Retrieval Augmented Generation: A Case Study in the Medical Domain</h1>
+            <div class="is-size-4 has-text-centered has-text-weight-bold" style="margin-bottom: 10px;">
+            Accepted at <b>BioNLP 2025 (Workshop cohosted with ACL2025)</b>
+            </div>
             <div class="is-size-5 publication-authors">
               <!-- Paper authors -->
               <span class="author-block">
@@ -67,6 +70,9 @@
                   </span>
                   <span class="author-block">
                     Kazuki Hayashi</a><sup>1</sup>,</span>
+                  </span>
+                  <span class="author-block">
+                    <a href="https://wataruhashimoto52.github.io/" target="_blank">Wataru Hashimoto</a><sup>1</sup>,</span>
                   </span>
                 </div>
                 <div class="is-size-5 publication-authors">
@@ -157,15 +163,16 @@
         <h2 class="title is-3">Abstract</h2>
         <div class="content has-text-justified">
           <p>
-            Retrieval Augmented Generation (RAG) complements the knowledge of Large Language Models (LLMs) by leveraging external information to enhance response accuracy for queries. <br>
-            This approach is widely applied in several fields by taking its advantage of injecting the most up-to-date information, and researchers are focusing on understanding and improving this aspect to unlock the full potential of RAG in such high-stakes applications. <br>
-            However, despite the potential of RAG to address these needs, the mechanisms behind the confidence levels of its outputs remain underexplored, although the confidence of information is very critical in some domains, such as finance, healthcare, and medicine. <br>
-            Our study focuses the impact of RAG on confidence within the medical domain under various configurations and models.  <br>
-            We evaluate confidence by treating the model's predicted probability as its output and calculating Expected Calibration Error (ECE) and Adaptive Calibration Error (ACE) scores based on the probabilities and accuracy. <br>
-            In addition, we analyze whether the order of retrieved documents within prompts calibrates the confidence. <br>
-            Our findings reveal large variation in confidence and accuracy depending on the model, settings, and the format of input prompts. <br>
-            These results underscore the necessity of optimizing configurations based on the specific model and conditions.
-          </p>
+Retrieval Augmented Generation (RAG) complements the knowledge of Large Language Models (LLMs) by leveraging external information to enhance response accuracy for queries. <br>
+This approach is widely applied in several fields by taking its advantage of injecting the most up-to-date information, and researchers are focusing on understanding and improving this aspect to unlock the full potential of RAG in such high-stakes applications. <br>
+However, despite the potential of RAG to address these needs, the mechanisms behind the confidence levels of its outputs remain underexplored. <br>
+Our study focuses on the impact of RAG, specifically examining whether RAG improves the confidence of LLM outputs in the medical domain. <br>
+We conduct this analysis across various configurations and models. <br>
+We evaluate confidence by treating the model's predicted probability as its output and calculating several evaluation metrics which include calibration error method, entropy, the best probability, and accuracy. <br>
+Experimental results across multiple datasets confirmed that certain models possess the capability to judge for themselves whether an inserted document relates to the correct answer.  <br>
+These results suggest that evaluating models based on their output probabilities determine whether they function as generators in the RAG framework. <br>
+Our approach allows us to evaluate whether the models handle retrieved documents. <br>
+        </p>
         </div>
       </div>
     </div>
